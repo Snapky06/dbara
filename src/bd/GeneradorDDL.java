@@ -26,11 +26,11 @@ public class GeneradorDDL {
                          "rf.RDB$NULL_FLAG, rf.RDB$DEFAULT_SOURCE " +
                          "FROM RDB$RELATION_FIELDS rf " +
                          "JOIN RDB$FIELDS f ON rf.RDB$FIELD_SOURCE = f.RDB$FIELD_NAME " +
-                         "WHERE rf.RDB$RELATION_NAME = ? " +
+                         "WHERE TRIM(rf.RDB$RELATION_NAME) = ? " +
                          "ORDER BY rf.RDB$FIELD_POSITION";
 
         try (PreparedStatement ps = con.prepareStatement(sqlCols)) {
-            ps.setString(1, tabla);
+            ps.setString(1, tabla.trim());
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     String col = rs.getString(1).trim();
@@ -72,14 +72,14 @@ public class GeneradorDDL {
         String sql = "SELECT rc.RDB$CONSTRAINT_NAME, iseg.RDB$FIELD_NAME " +
                      "FROM RDB$RELATION_CONSTRAINTS rc " +
                      "JOIN RDB$INDEX_SEGMENTS iseg ON rc.RDB$INDEX_NAME = iseg.RDB$INDEX_NAME " +
-                     "WHERE rc.RDB$RELATION_NAME = ? AND rc.RDB$CONSTRAINT_TYPE = 'PRIMARY KEY' " +
+                     "WHERE TRIM(rc.RDB$RELATION_NAME) = ? AND rc.RDB$CONSTRAINT_TYPE = 'PRIMARY KEY' " +
                      "ORDER BY iseg.RDB$FIELD_POSITION";
 
         List<String> cols = new ArrayList<>();
         String nombrePk = "";
 
         try (PreparedStatement ps = con.prepareStatement(sql)) {
-            ps.setString(1, tabla);
+            ps.setString(1, tabla.trim());
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     nombrePk = rs.getString(1).trim();
@@ -104,10 +104,10 @@ public class GeneradorDDL {
                      "JOIN RDB$INDEX_SEGMENTS iseg ON rc.RDB$INDEX_NAME = iseg.RDB$INDEX_NAME " +
                      "JOIN RDB$INDEX_SEGMENTS iseg2 ON rc2.RDB$INDEX_NAME = iseg2.RDB$INDEX_NAME " +
                      "AND iseg.RDB$FIELD_POSITION = iseg2.RDB$FIELD_POSITION " +
-                     "WHERE rc.RDB$RELATION_NAME = ? AND rc.RDB$CONSTRAINT_TYPE = 'FOREIGN KEY'";
+                     "WHERE TRIM(rc.RDB$RELATION_NAME) = ? AND rc.RDB$CONSTRAINT_TYPE = 'FOREIGN KEY'";
 
         try (PreparedStatement ps = con.prepareStatement(sql)) {
-            ps.setString(1, tabla);
+            ps.setString(1, tabla.trim());
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     String nom = rs.getString(1).trim();
@@ -122,9 +122,9 @@ public class GeneradorDDL {
     }
 
     public String getDDLVista(String vista) throws SQLException {
-        String sql = "SELECT RDB$VIEW_SOURCE FROM RDB$RELATIONS WHERE RDB$RELATION_NAME = ?";
+        String sql = "SELECT RDB$VIEW_SOURCE FROM RDB$RELATIONS WHERE TRIM(RDB$RELATION_NAME) = ?";
         try (PreparedStatement ps = con.prepareStatement(sql)) {
-            ps.setString(1, vista);
+            ps.setString(1, vista.trim());
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
                     String src = rs.getString(1);
@@ -137,9 +137,9 @@ public class GeneradorDDL {
 
     public String getDDLTrigger(String trigger) throws SQLException {
         String sql = "SELECT RDB$RELATION_NAME, RDB$TRIGGER_TYPE, RDB$TRIGGER_INACTIVE, RDB$TRIGGER_SOURCE " +
-                     "FROM RDB$TRIGGERS WHERE RDB$TRIGGER_NAME = ?";
+                     "FROM RDB$TRIGGERS WHERE TRIM(RDB$TRIGGER_NAME) = ?";
         try (PreparedStatement ps = con.prepareStatement(sql)) {
-            ps.setString(1, trigger);
+            ps.setString(1, trigger.trim());
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
                     String tabla = rs.getString(1).trim();
@@ -160,10 +160,10 @@ public class GeneradorDDL {
     }
 
     public String getDDLProcedimiento(String proc) throws SQLException {
-        String sql = "SELECT RDB$PROCEDURE_SOURCE FROM RDB$PROCEDURES WHERE RDB$PROCEDURE_NAME = ?";
+        String sql = "SELECT RDB$PROCEDURE_SOURCE FROM RDB$PROCEDURES WHERE TRIM(RDB$PROCEDURE_NAME) = ?";
         String cuerpo = "";
         try (PreparedStatement ps = con.prepareStatement(sql)) {
-            ps.setString(1, proc);
+            ps.setString(1, proc.trim());
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
                     cuerpo = rs.getString(1);
@@ -178,10 +178,10 @@ public class GeneradorDDL {
                            "f.RDB$FIELD_TYPE, f.RDB$FIELD_SUB_TYPE, f.RDB$FIELD_LENGTH, f.RDB$FIELD_SCALE, f.RDB$FIELD_PRECISION " +
                            "FROM RDB$PROCEDURE_PARAMETERS pp " +
                            "JOIN RDB$FIELDS f ON pp.RDB$FIELD_SOURCE = f.RDB$FIELD_NAME " +
-                           "WHERE pp.RDB$PROCEDURE_NAME = ? ORDER BY pp.RDB$PARAMETER_NUMBER";
+                           "WHERE TRIM(pp.RDB$PROCEDURE_NAME) = ? ORDER BY pp.RDB$PARAMETER_NUMBER";
 
         try (PreparedStatement ps = con.prepareStatement(sqlParams)) {
-            ps.setString(1, proc);
+            ps.setString(1, proc.trim());
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     String nom = rs.getString(1).trim();
@@ -224,7 +224,7 @@ public class GeneradorDDL {
         String sql = "SELECT i.RDB$RELATION_NAME, i.RDB$UNIQUE_FLAG, i.RDB$INDEX_TYPE, s.RDB$FIELD_NAME " +
                      "FROM RDB$INDICES i " +
                      "JOIN RDB$INDEX_SEGMENTS s ON i.RDB$INDEX_NAME = s.RDB$INDEX_NAME " +
-                     "WHERE i.RDB$INDEX_NAME = ? ORDER BY s.RDB$FIELD_POSITION";
+                     "WHERE TRIM(i.RDB$INDEX_NAME) = ? ORDER BY s.RDB$FIELD_POSITION";
 
         String tabla = "";
         boolean unico = false;
@@ -232,7 +232,7 @@ public class GeneradorDDL {
         List<String> cols = new ArrayList<>();
 
         try (PreparedStatement ps = con.prepareStatement(sql)) {
-            ps.setString(1, indice);
+            ps.setString(1, indice.trim());
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     tabla = rs.getString(1).trim();
@@ -252,9 +252,9 @@ public class GeneradorDDL {
     }
 
     public String getDDLFuncion(String func) throws SQLException {
-        String sql = "SELECT RDB$MODULE_NAME, RDB$ENTRYPOINT FROM RDB$FUNCTIONS WHERE RDB$FUNCTION_NAME = ?";
+        String sql = "SELECT RDB$MODULE_NAME, RDB$ENTRYPOINT FROM RDB$FUNCTIONS WHERE TRIM(RDB$FUNCTION_NAME) = ?";
         try (PreparedStatement ps = con.prepareStatement(sql)) {
-            ps.setString(1, func);
+            ps.setString(1, func.trim());
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
                     String mod = rs.getString(1) != null ? rs.getString(1).trim() : "";

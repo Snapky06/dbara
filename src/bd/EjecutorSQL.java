@@ -49,14 +49,25 @@ public class EjecutorSQL {
     }
 
     public String ejecutarScript(String script) throws SQLException {
-        String[] sentencias = script.split(";");
-        int ejecutadas = 0;
+        String limpio = script.trim();
+        String upper = limpio.toUpperCase();
 
+        if (upper.startsWith("CREATE TRIGGER") || upper.startsWith("ALTER TRIGGER") ||
+            upper.startsWith("CREATE PROCEDURE") || upper.startsWith("ALTER PROCEDURE") ||
+            upper.startsWith("CREATE OR ALTER")) {
+            try (Statement st = con.createStatement()) {
+                st.execute(limpio);
+            }
+            return "Objeto compilado correctamente.";
+        }
+
+        String[] sentencias = limpio.split(";");
+        int ejecutadas = 0;
         try (Statement st = con.createStatement()) {
             for (String s : sentencias) {
-                String limpia = s.trim();
-                if (!limpia.isEmpty()) {
-                    st.execute(limpia);
+                String sLimpia = s.trim();
+                if (!sLimpia.isEmpty()) {
+                    st.execute(sLimpia);
                     ejecutadas++;
                 }
             }
