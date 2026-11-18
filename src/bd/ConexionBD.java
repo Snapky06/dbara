@@ -4,7 +4,10 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.sql.Connection;
+import java.sql.Driver;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.ArrayList;
@@ -14,6 +17,7 @@ import java.util.Properties;
 public class ConexionBD {
 
     private static final String ARCHIVO = "conexiones.properties";
+    private static Driver driverCargado;
 
     public static class Perfil {
         public String nombre;
@@ -33,8 +37,15 @@ public class ConexionBD {
         }
 
         public String getUrl() {
-            String r = ruta.startsWith("/") ? ruta : "/" + ruta;
-            return "jdbc:interbase://" + ip + ":" + puerto + r;
+            String r = ruta.trim();
+            if (!r.startsWith("/")) {
+                r = "/" + r;
+            }
+            String p = puerto.trim();
+            if (p.isEmpty() || p.equals("3050")) {
+                return "jdbc:interbase://" + ip.trim() + r;
+            }
+            return "jdbc:interbase://" + ip.trim() + ":" + p + r;
         }
 
         @Override
@@ -43,13 +54,46 @@ public class ConexionBD {
         }
     }
 
-    public static Connection conectar(Perfil p) throws ClassNotFoundException, SQLException {
-        Class.forName("interbase.interclient.Driver");
+    private static Driver obtenerDriver() throws Exception {
+        if (driverCargado != null) {
+            return driverCargado;
+        }
+        try {
+            Class<?> cls = Class.forName("interbase.interclient.Driver");
+            driverCargado = (Driver) cls.getDeclaredConstructor().newInstance();
+            return driverCargado;
+        } catch (ClassNotFoundException e) {
+            File dirLib = new File("lib");
+            if (dirLib.exists() && dirLib.isDirectory()) {
+                File[] jars = dirLib.listFiles((d, name) -> name.toLowerCase().endsWith(".jar"));
+                if (jars != null && jars.length > 0) {
+                    URL[] urls = new URL[jars.length];
+                    for (int i = 0; i < jars.length; i++) {
+                        urls[i] = jars[i].toURI().toURL();
+                    }
+                    URLClassLoader loader = new URLClassLoader(urls, ConexionBD.class.getClassLoader());
+                    Class<?> cls = Class.forName("interbase.interclient.Driver", true, loader);
+                    driverCargado = (Driver) cls.getDeclaredConstructor().newInstance();
+                    return driverCargado;
+                }
+            }
+            throw new SQLException("No se encontro interclient.jar dentro de la carpeta lib/");
+        }
+    }
+
+    public static Connection conectar(Perfil p) throws Exception {
+        Driver drv = obtenerDriver();
         Properties props = new Properties();
-        props.setProperty("user", p.usuario);
+        props.setProperty("user", p.usuario.trim());
         props.setProperty("password", p.clave);
-        props.setProperty("charSet", "UTF8");
-        return DriverManager.getConnection(p.getUrl(), props);
+
+        try {
+            return drv.connect(p.getUrl(), props);
+        } catch (SQLException ex) {
+            String urlAlterna = "jdbc:interbase://" + p.ip.trim() + ":" + p.puerto.trim() +
+                                (p.ruta.trim().startsWith("/") ? p.ruta.trim() : "/" + p.ruta.trim());
+            return drv.connect(urlAlterna, props);
+        }
     }
 
     public static void guardar(List<Perfil> lista) throws IOException {
