@@ -18,6 +18,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.sql.Connection;
+import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -37,12 +38,41 @@ public class ServidorApi {
 
         servidor.createContext("/", ServidorApi::manejarEstaticos);
         servidor.createContext("/api/conectar", ServidorApi::manejarConectar);
+        servidor.createContext("/api/desconectar", ServidorApi::manejarDesconectar);
         servidor.createContext("/api/catalogo", ServidorApi::manejarCatalogo);
         servidor.createContext("/api/ddl", ServidorApi::manejarDdl);
         servidor.createContext("/api/ejecutar", ServidorApi::manejarEjecutar);
 
         servidor.start();
         System.out.println("DBara Web corriendo en http://localhost:" + puerto);
+    }
+
+    private static boolean estaConectado() {
+        try {
+            return conexionActiva != null && !conexionActiva.isClosed();
+        } catch (SQLException e) {
+            return false;
+        }
+    }
+
+    private static void cerrarConexionActual() {
+        if (conexionActiva != null) {
+            try {
+                if (!conexionActiva.isClosed()) {
+                    conexionActiva.close();
+                }
+            } catch (SQLException ignored) {
+            }
+        }
+        conexionActiva = null;
+        catalogo = null;
+        generadorDDL = null;
+        ejecutorSQL = null;
+    }
+
+    private static String mensajeError(Exception ex) {
+        String msg = ex.getMessage();
+        return (msg == null || msg.isBlank()) ? ex.getClass().getSimpleName() : msg;
     }
 
     private static void manejarEstaticos(HttpExchange exchange) throws IOException {
@@ -63,13 +93,14 @@ public class ServidorApi {
         String tipoMime = obtenerMime(archivo.getFileName().toString());
         byte[] bytes = Files.readAllBytes(archivo);
         exchange.getResponseHeaders().set("Content-Type", tipoMime);
+        exchange.getResponseHeaders().set("Cache-Control", "no-cache");
         exchange.sendResponseHeaders(200, bytes.length);
         try (OutputStream os = exchange.getResponseBody()) {
             os.write(bytes);
         }
     }
 
-    private static void manejarConectar(HttpExchange exchange) throws IOException {
+    private static synchronized void manejarConectar(HttpExchange exchange) throws IOException {
         if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
             exchange.sendResponseHeaders(405, -1);
             return;
@@ -88,9 +119,7 @@ public class ServidorApi {
                 throw new Exception("El driver devolvio conexion nula. Revisa la URL y credenciales.");
             }
 
-            if (conexionActiva != null && !conexionActiva.isClosed()) {
-                conexionActiva.close();
-            }
+            cerrarConexionActual();
             conexionActiva = nuevaConexion;
             catalogo = new Catalogo(conexionActiva);
             generadorDDL = new GeneradorDDL(conexionActiva);
@@ -98,17 +127,26 @@ public class ServidorApi {
 
             enviarJson(exchange, 200, "{\"ok\":true,\"mensaje\":\"Conectado a " + escaparJson(perfil.getUrl()) + "\"}");
         } catch (Exception ex) {
-            enviarJson(exchange, 400, "{\"ok\":false,\"error\":\"" + escaparJson(ex.getMessage()) + "\"}");
+            enviarJson(exchange, 400, "{\"ok\":false,\"error\":\"" + escaparJson(mensajeError(ex)) + "\"}");
         }
     }
 
-    private static void manejarCatalogo(HttpExchange exchange) throws IOException {
+    private static synchronized void manejarDesconectar(HttpExchange exchange) throws IOException {
+        if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+            exchange.sendResponseHeaders(405, -1);
+            return;
+        }
+        cerrarConexionActual();
+        enviarJson(exchange, 200, "{\"ok\":true,\"mensaje\":\"Sesión cerrada correctamente.\"}");
+    }
+
+    private static synchronized void manejarCatalogo(HttpExchange exchange) throws IOException {
         if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
             exchange.sendResponseHeaders(405, -1);
             return;
         }
-        if (catalogo == null) {
-            enviarJson(exchange, 400, "{\"ok\":false,\"error\":\"No hay conexion activa\"}");
+        if (!estaConectado() || catalogo == null) {
+            enviarJson(exchange, 400, "{\"ok\":false,\"error\":\"No hay conexión activa.\"}");
             return;
         }
         try {
@@ -124,17 +162,17 @@ public class ServidorApi {
             json.append("}");
             enviarJson(exchange, 200, json.toString());
         } catch (Exception ex) {
-            enviarJson(exchange, 500, "{\"ok\":false,\"error\":\"" + escaparJson(ex.getMessage()) + "\"}");
+            enviarJson(exchange, 500, "{\"ok\":false,\"error\":\"" + escaparJson(mensajeError(ex)) + "\"}");
         }
     }
 
-    private static void manejarDdl(HttpExchange exchange) throws IOException {
+    private static synchronized void manejarDdl(HttpExchange exchange) throws IOException {
         if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
             exchange.sendResponseHeaders(405, -1);
             return;
         }
-        if (generadorDDL == null) {
-            enviarJson(exchange, 400, "{\"ok\":false,\"error\":\"No hay conexion activa\"}");
+        if (!estaConectado() || generadorDDL == null) {
+            enviarJson(exchange, 400, "{\"ok\":false,\"error\":\"No hay conexión activa.\"}");
             return;
         }
         Map<String, String> params = parsearQuery(exchange.getRequestURI().getRawQuery());
@@ -166,34 +204,24 @@ public class ServidorApi {
                     ddl = generadorDDL.getDDLIndice(nombre);
                     break;
                 case "usuarios":
-                    ddl = "SELECT * FROM RDB$USER_PRIVILEGES WHERE RDB$USER = '" + nombre + "';";
-                    break;
-                case "paquetes":
-                    ddl = "-- JUSTIFICACION TECNICA (PAQUETES):\n" +
-                          "-- InterBase no implementa paquetes estilo Oracle (CREATE PACKAGE).\n" +
-                          "-- Procedimientos y funciones se almacenan de forma independiente en RDB$PROCEDURES y RDB$FUNCTIONS.";
-                    break;
-                case "tablespaces":
-                    ddl = "-- JUSTIFICACION TECNICA (TABLESPACES):\n" +
-                          "-- En arquitectura estandar de InterBase el almacenamiento fisico se gestiona mediante archivos\n" +
-                          "-- secundarios registrados en RDB$FILES (ALTER DATABASE ADD FILE) en lugar de tablespaces logicos.";
+                    ddl = "SELECT * FROM RDB$USER_PRIVILEGES WHERE RDB$USER = '" + nombre.replace("'", "''") + "';";
                     break;
                 default:
                     ddl = "";
             }
             enviarJson(exchange, 200, "{\"ok\":true,\"ddl\":\"" + escaparJson(ddl) + "\"}");
         } catch (Exception ex) {
-            enviarJson(exchange, 400, "{\"ok\":false,\"error\":\"" + escaparJson(ex.getMessage()) + "\"}");
+            enviarJson(exchange, 400, "{\"ok\":false,\"error\":\"" + escaparJson(mensajeError(ex)) + "\"}");
         }
     }
 
-    private static void manejarEjecutar(HttpExchange exchange) throws IOException {
+    private static synchronized void manejarEjecutar(HttpExchange exchange) throws IOException {
         if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
             exchange.sendResponseHeaders(405, -1);
             return;
         }
-        if (ejecutorSQL == null) {
-            enviarJson(exchange, 400, "{\"ok\":false,\"error\":\"No hay conexion activa\"}");
+        if (!estaConectado() || ejecutorSQL == null) {
+            enviarJson(exchange, 400, "{\"ok\":false,\"error\":\"No hay conexión activa.\"}");
             return;
         }
         try {
@@ -201,14 +229,20 @@ public class ServidorApi {
             String sql = extraerCampoJson(cuerpo, "sql");
             boolean esScript = "true".equalsIgnoreCase(extraerBooleanoJson(cuerpo, "esScript"));
 
+            long inicio = System.nanoTime();
             if (esScript) {
                 String mensaje = ejecutorSQL.ejecutarScript(sql);
-                enviarJson(exchange, 200, "{\"ok\":true,\"esConsulta\":false,\"mensaje\":\"" + escaparJson(mensaje) + "\",\"columnas\":[],\"filas\":[]}");
+                long duracionMs = (System.nanoTime() - inicio) / 1_000_000L;
+                enviarJson(exchange, 200,
+                    "{\"ok\":true,\"esConsulta\":false,\"duracionMs\":" + duracionMs +
+                    ",\"mensaje\":\"" + escaparJson(mensaje) + "\",\"columnas\":[],\"filas\":[]}");
             } else {
                 ResultadoConsulta res = ejecutorSQL.ejecutar(sql);
+                long duracionMs = (System.nanoTime() - inicio) / 1_000_000L;
                 StringBuilder json = new StringBuilder("{");
                 json.append("\"ok\":true,");
                 json.append("\"esConsulta\":").append(res.esConsulta).append(",");
+                json.append("\"duracionMs\":").append(duracionMs).append(",");
                 json.append("\"mensaje\":\"").append(escaparJson(res.mensaje)).append("\",");
                 json.append("\"columnas\":").append(listaAJson(res.columnas)).append(",");
                 json.append("\"filas\":").append(filasAJson(res.columnas, res.filas));
@@ -216,7 +250,7 @@ public class ServidorApi {
                 enviarJson(exchange, 200, json.toString());
             }
         } catch (Exception ex) {
-            enviarJson(exchange, 400, "{\"ok\":false,\"error\":\"" + escaparJson(ex.getMessage()) + "\"}");
+            enviarJson(exchange, 400, "{\"ok\":false,\"error\":\"" + escaparJson(mensajeError(ex)) + "\"}");
         }
     }
 
@@ -243,6 +277,7 @@ public class ServidorApi {
         if (nombre.endsWith(".html")) return "text/html; charset=UTF-8";
         if (nombre.endsWith(".js")) return "application/javascript; charset=UTF-8";
         if (nombre.endsWith(".css")) return "text/css; charset=UTF-8";
+        if (nombre.endsWith(".svg")) return "image/svg+xml";
         return "application/octet-stream";
     }
 
@@ -259,7 +294,7 @@ public class ServidorApi {
     }
 
     private static String extraerCampoJson(String json, String clave) {
-        Pattern p = Pattern.compile("\"" + Pattern.quote(clave) + "\"\\s*:\\s*\"((?:\\\\.|[^\"])*)\"");
+        Pattern p = Pattern.compile("\"" + Pattern.quote(clave) + "\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
         Matcher m = p.matcher(json);
         if (!m.find()) return "";
         return desescaparJson(m.group(1));
@@ -272,20 +307,65 @@ public class ServidorApi {
     }
 
     private static String desescaparJson(String s) {
-        return s.replace("\\n", "\n")
-                .replace("\\r", "\r")
-                .replace("\\t", "\t")
-                .replace("\\\"", "\"")
-                .replace("\\\\", "\\");
+        StringBuilder out = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '\\' && i + 1 < s.length()) {
+                char sig = s.charAt(++i);
+                switch (sig) {
+                    case 'n': out.append('\n'); break;
+                    case 'r': out.append('\r'); break;
+                    case 't': out.append('\t'); break;
+                    case 'b': out.append('\b'); break;
+                    case 'f': out.append('\f'); break;
+                    case '"': out.append('"'); break;
+                    case '\\': out.append('\\'); break;
+                    case '/': out.append('/'); break;
+                    case 'u':
+                        if (i + 4 < s.length()) {
+                            String hex = s.substring(i + 1, i + 5);
+                            try {
+                                out.append((char) Integer.parseInt(hex, 16));
+                                i += 4;
+                            } catch (NumberFormatException e) {
+                                out.append("\\u");
+                            }
+                        } else {
+                            out.append("\\u");
+                        }
+                        break;
+                    default:
+                        out.append(sig);
+                }
+            } else {
+                out.append(c);
+            }
+        }
+        return out.toString();
     }
 
     private static String escaparJson(String s) {
         if (s == null) return "";
-        return s.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t");
+        StringBuilder out = new StringBuilder(s.length() + 16);
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"': out.append("\\\""); break;
+                case '\\': out.append("\\\\"); break;
+                case '\b': out.append("\\b"); break;
+                case '\f': out.append("\\f"); break;
+                case '\n': out.append("\\n"); break;
+                case '\r': out.append("\\r"); break;
+                case '\t': out.append("\\t"); break;
+                default:
+                    if (c < 0x20) {
+                        out.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        out.append(c);
+                    }
+            }
+        }
+        return out.toString();
     }
 
     private static String listaAJson(List<String> items) {
@@ -311,7 +391,15 @@ public class ServidorApi {
                 sb.append("\"").append(escaparJson(col)).append("\":");
                 if (val == null) {
                     sb.append("null");
-                } else if (val instanceof Number || val instanceof Boolean) {
+                } else if (val instanceof Boolean) {
+                    sb.append(val);
+                } else if (val instanceof Double) {
+                    double d = (Double) val;
+                    sb.append(Double.isFinite(d) ? d : "null");
+                } else if (val instanceof Float) {
+                    float f = (Float) val;
+                    sb.append(Float.isFinite(f) ? f : "null");
+                } else if (val instanceof Number) {
                     sb.append(val);
                 } else {
                     sb.append("\"").append(escaparJson(String.valueOf(val))).append("\"");

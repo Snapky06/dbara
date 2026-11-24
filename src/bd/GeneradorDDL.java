@@ -4,169 +4,169 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 
 public class GeneradorDDL {
 
-    private final Connection con;
+    private final Connection connection;
 
-    public GeneradorDDL(Connection con) {
-        this.con = con;
+    public GeneradorDDL(Connection connection) {
+        this.connection = connection;
     }
 
-    public String getDDLTabla(String tabla) throws SQLException {
-        StringBuilder sb = new StringBuilder();
-        sb.append("CREATE TABLE ").append(tabla).append(" (\n");
+    public String getDDLTabla(String nombreTabla) throws SQLException {
+        String tabla = limpiar(nombreTabla);
+        StringBuilder ddl = new StringBuilder();
+        ddl.append("CREATE TABLE ").append(tabla).append(" (\n");
 
-        List<String> lineas = new ArrayList<>();
+        List<String> definiciones = new ArrayList<>();
 
-        String sqlCols = "SELECT rf.RDB$FIELD_NAME, f.RDB$FIELD_TYPE, f.RDB$FIELD_SUB_TYPE, " +
-                         "f.RDB$FIELD_LENGTH, f.RDB$FIELD_SCALE, f.RDB$FIELD_PRECISION, " +
-                         "rf.RDB$NULL_FLAG, rf.RDB$DEFAULT_SOURCE " +
-                         "FROM RDB$RELATION_FIELDS rf " +
-                         "JOIN RDB$FIELDS f ON rf.RDB$FIELD_SOURCE = f.RDB$FIELD_NAME " +
-                         "WHERE TRIM(rf.RDB$RELATION_NAME) = ? " +
-                         "ORDER BY rf.RDB$FIELD_POSITION";
+        String sqlCols =
+            "SELECT rf.RDB$FIELD_NAME, rf.RDB$NULL_FLAG, rf.RDB$DEFAULT_SOURCE AS COL_DEFAULT, " +
+            "f.RDB$FIELD_TYPE, f.RDB$FIELD_SUB_TYPE, f.RDB$FIELD_LENGTH, " +
+            "f.RDB$CHARACTER_LENGTH, f.RDB$FIELD_PRECISION, f.RDB$FIELD_SCALE, " +
+            "f.RDB$DEFAULT_SOURCE AS DOM_DEFAULT " +
+            "FROM RDB$RELATION_FIELDS rf " +
+            "JOIN RDB$FIELDS f ON rf.RDB$FIELD_SOURCE = f.RDB$FIELD_NAME " +
+            "WHERE rf.RDB$RELATION_NAME = ? " +
+            "ORDER BY rf.RDB$FIELD_POSITION";
 
-        try (PreparedStatement ps = con.prepareStatement(sqlCols)) {
-            ps.setString(1, tabla.trim());
+        try (PreparedStatement ps = connection.prepareStatement(sqlCols)) {
+            ps.setString(1, tabla);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
-                    String col = rs.getString(1).trim();
-                    int tipo = rs.getInt(2);
-                    int subtipo = rs.getInt(3);
-                    int largo = rs.getInt(4);
-                    int escala = rs.getInt(5);
-                    int prec = rs.getInt(6);
-                    int nulo = rs.getInt(7);
-                    String def = rs.getString(8);
+                    String colNombre = limpiar(rs.getString("RDB$FIELD_NAME"));
+                    int tipo = rs.getInt("RDB$FIELD_TYPE");
+                    int subTipo = obtenerInt(rs, "RDB$FIELD_SUB_TYPE");
+                    int longitud = obtenerInt(rs, "RDB$FIELD_LENGTH");
+                    int charLen = obtenerInt(rs, "RDB$CHARACTER_LENGTH");
+                    int precision = obtenerInt(rs, "RDB$FIELD_PRECISION");
+                    int escala = obtenerInt(rs, "RDB$FIELD_SCALE");
+                    int nullFlag = obtenerInt(rs, "RDB$NULL_FLAG");
 
-                    StringBuilder linea = new StringBuilder("    ");
-                    linea.append(col).append(" ").append(traducirTipo(tipo, subtipo, largo, escala, prec));
+                    String defCol = limpiar(rs.getString("COL_DEFAULT"));
+                    String defDom = limpiar(rs.getString("DOM_DEFAULT"));
+                    String valorDefault = !defCol.isEmpty() ? defCol : defDom;
 
-                    if (def != null && !def.trim().isEmpty()) {
-                        linea.append(" ").append(def.trim());
+                    StringBuilder linea = new StringBuilder();
+                    linea.append("    ").append(colNombre).append(" ")
+                         .append(mapearTipo(tipo, subTipo, longitud, charLen, precision, escala));
+
+                    if (!valorDefault.isEmpty()) {
+                        if (valorDefault.toUpperCase().startsWith("DEFAULT")) {
+                            linea.append(" ").append(valorDefault);
+                        } else {
+                            linea.append(" DEFAULT ").append(valorDefault);
+                        }
                     }
-                    if (nulo == 1) {
+
+                    if (nullFlag == 1) {
                         linea.append(" NOT NULL");
                     }
-                    lineas.add(linea.toString());
+                    definiciones.add(linea.toString());
                 }
             }
         }
 
-        String pk = getPK(tabla);
-        if (!pk.isEmpty()) {
-            lineas.add("    " + pk);
-        }
+        String sqlConstraints =
+            "SELECT RDB$CONSTRAINT_NAME, RDB$CONSTRAINT_TYPE, RDB$INDEX_NAME " +
+            "FROM RDB$RELATION_CONSTRAINTS " +
+            "WHERE RDB$RELATION_NAME = ? " +
+            "ORDER BY RDB$CONSTRAINT_TYPE, RDB$CONSTRAINT_NAME";
 
-        lineas.addAll(getFKs(tabla));
-
-        sb.append(String.join(",\n", lineas));
-        sb.append("\n);");
-        return sb.toString();
-    }
-
-    private String getPK(String tabla) throws SQLException {
-        String sql = "SELECT rc.RDB$CONSTRAINT_NAME, iseg.RDB$FIELD_NAME " +
-                     "FROM RDB$RELATION_CONSTRAINTS rc " +
-                     "JOIN RDB$INDEX_SEGMENTS iseg ON rc.RDB$INDEX_NAME = iseg.RDB$INDEX_NAME " +
-                     "WHERE TRIM(rc.RDB$RELATION_NAME) = ? AND rc.RDB$CONSTRAINT_TYPE = 'PRIMARY KEY' " +
-                     "ORDER BY iseg.RDB$FIELD_POSITION";
-
-        List<String> cols = new ArrayList<>();
-        String nombrePk = "";
-
-        try (PreparedStatement ps = con.prepareStatement(sql)) {
-            ps.setString(1, tabla.trim());
+        try (PreparedStatement ps = connection.prepareStatement(sqlConstraints)) {
+            ps.setString(1, tabla);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
-                    nombrePk = rs.getString(1).trim();
-                    cols.add(rs.getString(2).trim());
+                    String cNombre = limpiar(rs.getString("RDB$CONSTRAINT_NAME"));
+                    String cTipo = limpiar(rs.getString("RDB$CONSTRAINT_TYPE"));
+                    String idxNombre = limpiar(rs.getString("RDB$INDEX_NAME"));
+
+                    if ("PRIMARY KEY".equalsIgnoreCase(cTipo)) {
+                        List<String> cols = obtenerColumnasIndice(idxNombre);
+                        if (!cols.isEmpty()) {
+                            definiciones.add("    CONSTRAINT " + cNombre + " PRIMARY KEY (" + String.join(", ", cols) + ")");
+                        }
+                    } else if ("UNIQUE".equalsIgnoreCase(cTipo)) {
+                        List<String> cols = obtenerColumnasIndice(idxNombre);
+                        if (!cols.isEmpty()) {
+                            definiciones.add("    CONSTRAINT " + cNombre + " UNIQUE (" + String.join(", ", cols) + ")");
+                        }
+                    } else if ("FOREIGN KEY".equalsIgnoreCase(cTipo)) {
+                        String fk = construirForeignKey(cNombre, idxNombre);
+                        if (!fk.isEmpty()) {
+                            definiciones.add("    " + fk);
+                        }
+                    } else if ("CHECK".equalsIgnoreCase(cTipo)) {
+                        String chk = obtenerFuenteCheck(cNombre);
+                        if (!chk.isEmpty()) {
+                            definiciones.add("    CONSTRAINT " + cNombre + " " + chk);
+                        }
+                    }
                 }
             }
         }
 
-        if (cols.isEmpty()) {
-            return "";
+        if (definiciones.isEmpty()) {
+            return "-- No se encontraron columnas para la tabla " + tabla;
         }
-        return "CONSTRAINT " + nombrePk + " PRIMARY KEY (" + String.join(", ", cols) + ")";
+
+        ddl.append(String.join(",\n", definiciones));
+        ddl.append("\n);");
+        return ddl.toString();
     }
 
-    private List<String> getFKs(String tabla) throws SQLException {
-        List<String> fks = new ArrayList<>();
-        String sql = "SELECT rc.RDB$CONSTRAINT_NAME, iseg.RDB$FIELD_NAME, " +
-                     "rc2.RDB$RELATION_NAME, iseg2.RDB$FIELD_NAME " +
-                     "FROM RDB$RELATION_CONSTRAINTS rc " +
-                     "JOIN RDB$REF_CONSTRAINTS ref ON rc.RDB$CONSTRAINT_NAME = ref.RDB$CONSTRAINT_NAME " +
-                     "JOIN RDB$RELATION_CONSTRAINTS rc2 ON ref.RDB$CONST_NAME_UQ = rc2.RDB$CONSTRAINT_NAME " +
-                     "JOIN RDB$INDEX_SEGMENTS iseg ON rc.RDB$INDEX_NAME = iseg.RDB$INDEX_NAME " +
-                     "JOIN RDB$INDEX_SEGMENTS iseg2 ON rc2.RDB$INDEX_NAME = iseg2.RDB$INDEX_NAME " +
-                     "AND iseg.RDB$FIELD_POSITION = iseg2.RDB$FIELD_POSITION " +
-                     "WHERE TRIM(rc.RDB$RELATION_NAME) = ? AND rc.RDB$CONSTRAINT_TYPE = 'FOREIGN KEY'";
+    public String getDDLVista(String nombreVista) throws SQLException {
+        String vista = limpiar(nombreVista);
+        String fuente = "";
 
-        try (PreparedStatement ps = con.prepareStatement(sql)) {
-            ps.setString(1, tabla.trim());
+        String sql = "SELECT RDB$VIEW_SOURCE FROM RDB$RELATIONS WHERE RDB$RELATION_NAME = ?";
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setString(1, vista);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    fuente = limpiar(rs.getString("RDB$VIEW_SOURCE"));
+                }
+            }
+        }
+
+        List<String> columnas = new ArrayList<>();
+        String sqlCols =
+            "SELECT RDB$FIELD_NAME FROM RDB$RELATION_FIELDS " +
+            "WHERE RDB$RELATION_NAME = ? ORDER BY RDB$FIELD_POSITION";
+        try (PreparedStatement ps = connection.prepareStatement(sqlCols)) {
+            ps.setString(1, vista);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
-                    String nom = rs.getString(1).trim();
-                    String colLocal = rs.getString(2).trim();
-                    String tablaRef = rs.getString(3).trim();
-                    String colRef = rs.getString(4).trim();
-                    fks.add("    CONSTRAINT " + nom + " FOREIGN KEY (" + colLocal + ") REFERENCES " + tablaRef + " (" + colRef + ")");
+                    columnas.add(limpiar(rs.getString("RDB$FIELD_NAME")));
                 }
             }
         }
-        return fks;
-    }
 
-    public String getDDLVista(String vista) throws SQLException {
-        String sql = "SELECT RDB$VIEW_SOURCE FROM RDB$RELATIONS WHERE TRIM(RDB$RELATION_NAME) = ?";
-        try (PreparedStatement ps = con.prepareStatement(sql)) {
-            ps.setString(1, vista.trim());
-            try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
-                    String src = rs.getString(1);
-                    return "CREATE VIEW " + vista + " AS\n" + (src != null ? src.trim() : "") + ";";
-                }
-            }
+        StringBuilder ddl = new StringBuilder();
+        ddl.append("CREATE VIEW ").append(vista);
+        if (!columnas.isEmpty()) {
+            ddl.append(" (").append(String.join(", ", columnas)).append(")");
         }
-        return "";
-    }
-
-    public String getDDLTrigger(String trigger) throws SQLException {
-        String sql = "SELECT RDB$RELATION_NAME, RDB$TRIGGER_TYPE, RDB$TRIGGER_INACTIVE, RDB$TRIGGER_SOURCE " +
-                     "FROM RDB$TRIGGERS WHERE TRIM(RDB$TRIGGER_NAME) = ?";
-        try (PreparedStatement ps = con.prepareStatement(sql)) {
-            ps.setString(1, trigger.trim());
-            try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
-                    String tabla = rs.getString(1).trim();
-                    int tipo = rs.getInt(2);
-                    int inactivo = rs.getInt(3);
-                    String src = rs.getString(4);
-
-                    String estado = (inactivo == 1) ? "INACTIVE" : "ACTIVE";
-                    String evento = traducirEventoTrigger(tipo);
-
-                    return "CREATE TRIGGER " + trigger + " FOR " + tabla + "\n" +
-                           estado + " " + evento + "\n" +
-                           (src != null ? src.trim() : "");
-                }
-            }
+        ddl.append(" AS\n").append(fuente);
+        if (!fuente.endsWith(";")) {
+            ddl.append(";");
         }
-        return "";
+        return ddl.toString();
     }
 
-    public String getDDLProcedimiento(String proc) throws SQLException {
-        String sql = "SELECT RDB$PROCEDURE_SOURCE FROM RDB$PROCEDURES WHERE TRIM(RDB$PROCEDURE_NAME) = ?";
-        String cuerpo = "";
-        try (PreparedStatement ps = con.prepareStatement(sql)) {
-            ps.setString(1, proc.trim());
+    public String getDDLProcedimiento(String nombreProc) throws SQLException {
+        String proc = limpiar(nombreProc);
+        String fuente = "";
+
+        String sql = "SELECT RDB$PROCEDURE_SOURCE FROM RDB$PROCEDURES WHERE RDB$PROCEDURE_NAME = ?";
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setString(1, proc);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
-                    cuerpo = rs.getString(1);
+                    fuente = limpiar(rs.getString("RDB$PROCEDURE_SOURCE"));
                 }
             }
         }
@@ -174,109 +174,296 @@ public class GeneradorDDL {
         List<String> entradas = new ArrayList<>();
         List<String> salidas = new ArrayList<>();
 
-        String sqlParams = "SELECT pp.RDB$PARAMETER_NAME, pp.RDB$PARAMETER_TYPE, " +
-                           "f.RDB$FIELD_TYPE, f.RDB$FIELD_SUB_TYPE, f.RDB$FIELD_LENGTH, f.RDB$FIELD_SCALE, f.RDB$FIELD_PRECISION " +
-                           "FROM RDB$PROCEDURE_PARAMETERS pp " +
-                           "JOIN RDB$FIELDS f ON pp.RDB$FIELD_SOURCE = f.RDB$FIELD_NAME " +
-                           "WHERE TRIM(pp.RDB$PROCEDURE_NAME) = ? ORDER BY pp.RDB$PARAMETER_NUMBER";
+        String sqlParams =
+            "SELECT pp.RDB$PARAMETER_NAME, pp.RDB$PARAMETER_TYPE, " +
+            "f.RDB$FIELD_TYPE, f.RDB$FIELD_SUB_TYPE, f.RDB$FIELD_LENGTH, " +
+            "f.RDB$CHARACTER_LENGTH, f.RDB$FIELD_PRECISION, f.RDB$FIELD_SCALE " +
+            "FROM RDB$PROCEDURE_PARAMETERS pp " +
+            "JOIN RDB$FIELDS f ON pp.RDB$FIELD_SOURCE = f.RDB$FIELD_NAME " +
+            "WHERE pp.RDB$PROCEDURE_NAME = ? " +
+            "ORDER BY pp.RDB$PARAMETER_TYPE, pp.RDB$PARAMETER_NUMBER";
 
-        try (PreparedStatement ps = con.prepareStatement(sqlParams)) {
-            ps.setString(1, proc.trim());
+        try (PreparedStatement ps = connection.prepareStatement(sqlParams)) {
+            ps.setString(1, proc);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
-                    String nom = rs.getString(1).trim();
-                    int dir = rs.getInt(2);
-                    String tipo = traducirTipo(rs.getInt(3), rs.getInt(4), rs.getInt(5), rs.getInt(6), rs.getInt(7));
-                    if (dir == 0) {
-                        entradas.add(nom + " " + tipo);
+                    String pNombre = limpiar(rs.getString("RDB$PARAMETER_NAME"));
+                    int pTipo = rs.getInt("RDB$PARAMETER_TYPE");
+                    String tipoSql = mapearTipo(
+                        rs.getInt("RDB$FIELD_TYPE"),
+                        obtenerInt(rs, "RDB$FIELD_SUB_TYPE"),
+                        obtenerInt(rs, "RDB$FIELD_LENGTH"),
+                        obtenerInt(rs, "RDB$CHARACTER_LENGTH"),
+                        obtenerInt(rs, "RDB$FIELD_PRECISION"),
+                        obtenerInt(rs, "RDB$FIELD_SCALE")
+                    );
+                    String definicion = pNombre + " " + tipoSql;
+                    if (pTipo == 0) {
+                        entradas.add(definicion);
                     } else {
-                        salidas.add(nom + " " + tipo);
+                        salidas.add(definicion);
                     }
                 }
             }
         }
 
-        StringBuilder sb = new StringBuilder();
-        sb.append("CREATE PROCEDURE ").append(proc);
+        StringBuilder ddl = new StringBuilder();
+        ddl.append("CREATE PROCEDURE ").append(proc);
         if (!entradas.isEmpty()) {
-            sb.append(" (\n    ").append(String.join(",\n    ", entradas)).append("\n)");
+            ddl.append(" (\n    ").append(String.join(",\n    ", entradas)).append("\n)");
         }
         if (!salidas.isEmpty()) {
-            sb.append("\nRETURNS (\n    ").append(String.join(",\n    ", salidas)).append("\n)");
+            ddl.append("\nRETURNS (\n    ").append(String.join(",\n    ", salidas)).append("\n)");
         }
-        sb.append("\nAS\n").append(cuerpo != null ? cuerpo.trim() : "");
-        return sb.toString();
+        ddl.append("\nAS\n").append(fuente);
+        return ddl.toString();
     }
 
-    public String getDDLGenerador(String gen) throws SQLException {
-        long val = 0;
-        String sql = "SELECT GEN_ID(" + gen + ", 0) FROM RDB$DATABASE";
-        try (PreparedStatement ps = con.prepareStatement(sql);
-             ResultSet rs = ps.executeQuery()) {
-            if (rs.next()) {
-                val = rs.getLong(1);
-            }
-        }
-        return "CREATE GENERATOR " + gen + ";\nSET GENERATOR " + gen + " TO " + val + ";";
-    }
+    public String getDDLFuncion(String nombreFunc) throws SQLException {
+        String func = limpiar(nombreFunc);
+        String modulo = "";
+        String puntoEntrada = "";
+        int argRetorno = 0;
 
-    public String getDDLIndice(String indice) throws SQLException {
-        String sql = "SELECT i.RDB$RELATION_NAME, i.RDB$UNIQUE_FLAG, i.RDB$INDEX_TYPE, s.RDB$FIELD_NAME " +
-                     "FROM RDB$INDICES i " +
-                     "JOIN RDB$INDEX_SEGMENTS s ON i.RDB$INDEX_NAME = s.RDB$INDEX_NAME " +
-                     "WHERE TRIM(i.RDB$INDEX_NAME) = ? ORDER BY s.RDB$FIELD_POSITION";
-
-        String tabla = "";
-        boolean unico = false;
-        boolean desc = false;
-        List<String> cols = new ArrayList<>();
-
-        try (PreparedStatement ps = con.prepareStatement(sql)) {
-            ps.setString(1, indice.trim());
+        String sql =
+            "SELECT RDB$MODULE_NAME, RDB$ENTRYPOINT, RDB$RETURN_ARGUMENT " +
+            "FROM RDB$FUNCTIONS WHERE RDB$FUNCTION_NAME = ?";
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setString(1, func);
             try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    tabla = rs.getString(1).trim();
-                    unico = rs.getInt(2) == 1;
-                    desc = rs.getInt(3) == 1;
-                    cols.add(rs.getString(4).trim());
+                if (rs.next()) {
+                    modulo = limpiar(rs.getString("RDB$MODULE_NAME"));
+                    puntoEntrada = limpiar(rs.getString("RDB$ENTRYPOINT"));
+                    argRetorno = obtenerInt(rs, "RDB$RETURN_ARGUMENT");
                 }
             }
         }
 
-        if (cols.isEmpty()) {
-            return "";
+        List<String> args = new ArrayList<>();
+        String retorno = "";
+
+        String sqlArgs =
+            "SELECT RDB$ARGUMENT_POSITION, RDB$MECHANISM, RDB$FIELD_TYPE, " +
+            "RDB$FIELD_SUB_TYPE, RDB$FIELD_LENGTH, RDB$FIELD_PRECISION, RDB$FIELD_SCALE " +
+            "FROM RDB$FUNCTION_ARGUMENTS " +
+            "WHERE RDB$FUNCTION_NAME = ? " +
+            "ORDER BY RDB$ARGUMENT_POSITION";
+
+        try (PreparedStatement ps = connection.prepareStatement(sqlArgs)) {
+            ps.setString(1, func);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    int pos = rs.getInt("RDB$ARGUMENT_POSITION");
+                    int mecanismo = obtenerInt(rs, "RDB$MECHANISM");
+                    String tipoSql = mapearTipo(
+                        rs.getInt("RDB$FIELD_TYPE"),
+                        obtenerInt(rs, "RDB$FIELD_SUB_TYPE"),
+                        obtenerInt(rs, "RDB$FIELD_LENGTH"),
+                        0,
+                        obtenerInt(rs, "RDB$FIELD_PRECISION"),
+                        obtenerInt(rs, "RDB$FIELD_SCALE")
+                    );
+                    if (pos == argRetorno) {
+                        if (pos == 0) {
+                            retorno = tipoSql + (mecanismo == 0 ? " BY VALUE" : "");
+                        } else {
+                            args.add(tipoSql);
+                            retorno = "PARAMETER " + pos;
+                        }
+                    } else {
+                        args.add(tipoSql);
+                    }
+                }
+            }
         }
 
-        return "CREATE " + (unico ? "UNIQUE " : "") + (desc ? "DESCENDING " : "") +
-               "INDEX " + indice + " ON " + tabla + " (" + String.join(", ", cols) + ");";
+        StringBuilder ddl = new StringBuilder();
+        ddl.append("DECLARE EXTERNAL FUNCTION ").append(func);
+        if (!args.isEmpty()) {
+            ddl.append("\n    ").append(String.join(", ", args));
+        }
+        if (!retorno.isEmpty()) {
+            ddl.append("\nRETURNS ").append(retorno);
+        }
+        if (!puntoEntrada.isEmpty()) {
+            ddl.append("\nENTRY_POINT '").append(puntoEntrada).append("'");
+        }
+        if (!modulo.isEmpty()) {
+            ddl.append(" MODULE_NAME '").append(modulo).append("'");
+        }
+        ddl.append(";");
+        return ddl.toString();
     }
 
-    public String getDDLFuncion(String func) throws SQLException {
-        String sql = "SELECT RDB$MODULE_NAME, RDB$ENTRYPOINT FROM RDB$FUNCTIONS WHERE TRIM(RDB$FUNCTION_NAME) = ?";
-        try (PreparedStatement ps = con.prepareStatement(sql)) {
-            ps.setString(1, func.trim());
+    public String getDDLGenerador(String nombreGen) throws SQLException {
+        String gen = limpiar(nombreGen);
+        StringBuilder ddl = new StringBuilder();
+        ddl.append("CREATE GENERATOR ").append(gen).append(";\n");
+
+        try (Statement st = connection.createStatement();
+             ResultSet rs = st.executeQuery("SELECT GEN_ID(" + gen + ", 0) FROM RDB$DATABASE")) {
+            if (rs.next()) {
+                ddl.append("SET GENERATOR ").append(gen).append(" TO ").append(rs.getLong(1)).append(";");
+            }
+        }
+        return ddl.toString();
+    }
+
+    public String getDDLTrigger(String nombreTrigger) throws SQLException {
+        String trig = limpiar(nombreTrigger);
+        String sql =
+            "SELECT RDB$RELATION_NAME, RDB$TRIGGER_SEQUENCE, RDB$TRIGGER_TYPE, " +
+            "RDB$TRIGGER_SOURCE, RDB$TRIGGER_INACTIVE " +
+            "FROM RDB$TRIGGERS WHERE RDB$TRIGGER_NAME = ?";
+
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setString(1, trig);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return "-- No se encontró el trigger " + trig;
+                }
+                String tabla = limpiar(rs.getString("RDB$RELATION_NAME"));
+                int secuencia = obtenerInt(rs, "RDB$TRIGGER_SEQUENCE");
+                int tipo = obtenerInt(rs, "RDB$TRIGGER_TYPE");
+                int inactivo = obtenerInt(rs, "RDB$TRIGGER_INACTIVE");
+                String fuente = limpiar(rs.getString("RDB$TRIGGER_SOURCE"));
+
+                StringBuilder ddl = new StringBuilder();
+                ddl.append("CREATE TRIGGER ").append(trig).append(" FOR ").append(tabla).append("\n");
+                ddl.append(inactivo == 1 ? "INACTIVE " : "ACTIVE ");
+                ddl.append(mapearTipoTrigger(tipo)).append(" POSITION ").append(secuencia).append("\n");
+                if (!fuente.toUpperCase().startsWith("AS")) {
+                    ddl.append("AS\n");
+                }
+                ddl.append(fuente);
+                return ddl.toString();
+            }
+        }
+    }
+
+    public String getDDLIndice(String nombreIndice) throws SQLException {
+        String idx = limpiar(nombreIndice);
+        String sql =
+            "SELECT RDB$RELATION_NAME, RDB$UNIQUE_FLAG, RDB$INDEX_TYPE, RDB$INDEX_INACTIVE " +
+            "FROM RDB$INDICES WHERE RDB$INDEX_NAME = ?";
+
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setString(1, idx);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return "-- No se encontró el índice " + idx;
+                }
+                String tabla = limpiar(rs.getString("RDB$RELATION_NAME"));
+                int unico = obtenerInt(rs, "RDB$UNIQUE_FLAG");
+                int tipo = obtenerInt(rs, "RDB$INDEX_TYPE");
+                int inactivo = obtenerInt(rs, "RDB$INDEX_INACTIVE");
+                List<String> cols = obtenerColumnasIndice(idx);
+
+                StringBuilder ddl = new StringBuilder("CREATE ");
+                if (unico == 1) {
+                    ddl.append("UNIQUE ");
+                }
+                if (tipo == 1) {
+                    ddl.append("DESCENDING ");
+                }
+                ddl.append("INDEX ").append(idx).append(" ON ").append(tabla)
+                   .append(" (").append(String.join(", ", cols)).append(");");
+                if (inactivo == 1) {
+                    ddl.append("\nALTER INDEX ").append(idx).append(" INACTIVE;");
+                }
+                return ddl.toString();
+            }
+        }
+    }
+
+    private List<String> obtenerColumnasIndice(String nombreIndice) throws SQLException {
+        List<String> cols = new ArrayList<>();
+        if (nombreIndice.isEmpty()) {
+            return cols;
+        }
+        String sql =
+            "SELECT RDB$FIELD_NAME FROM RDB$INDEX_SEGMENTS " +
+            "WHERE RDB$INDEX_NAME = ? ORDER BY RDB$FIELD_POSITION";
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setString(1, nombreIndice);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    cols.add(limpiar(rs.getString("RDB$FIELD_NAME")));
+                }
+            }
+        }
+        return cols;
+    }
+
+    private String construirForeignKey(String cNombre, String idxLocal) throws SQLException {
+        List<String> colsLocales = obtenerColumnasIndice(idxLocal);
+        String sql =
+            "SELECT refc.RDB$UPDATE_RULE, refc.RDB$DELETE_RULE, " +
+            "rc2.RDB$RELATION_NAME AS REF_TABLA, rc2.RDB$INDEX_NAME AS REF_INDEX " +
+            "FROM RDB$REF_CONSTRAINTS refc " +
+            "JOIN RDB$RELATION_CONSTRAINTS rc2 ON refc.RDB$CONST_NAME_UQ = rc2.RDB$CONSTRAINT_NAME " +
+            "WHERE refc.RDB$CONSTRAINT_NAME = ?";
+
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setString(1, cNombre);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return "";
+                }
+                String refTabla = limpiar(rs.getString("REF_TABLA"));
+                String refIndex = limpiar(rs.getString("REF_INDEX"));
+                String onUpdate = limpiar(rs.getString("RDB$UPDATE_RULE"));
+                String onDelete = limpiar(rs.getString("RDB$DELETE_RULE"));
+                List<String> colsRef = obtenerColumnasIndice(refIndex);
+
+                StringBuilder fk = new StringBuilder();
+                fk.append("CONSTRAINT ").append(cNombre)
+                  .append(" FOREIGN KEY (").append(String.join(", ", colsLocales)).append(")")
+                  .append(" REFERENCES ").append(refTabla);
+                if (!colsRef.isEmpty()) {
+                    fk.append(" (").append(String.join(", ", colsRef)).append(")");
+                }
+                if (!onUpdate.isEmpty() && !"RESTRICT".equalsIgnoreCase(onUpdate)) {
+                    fk.append(" ON UPDATE ").append(onUpdate);
+                }
+                if (!onDelete.isEmpty() && !"RESTRICT".equalsIgnoreCase(onDelete)) {
+                    fk.append(" ON DELETE ").append(onDelete);
+                }
+                return fk.toString();
+            }
+        }
+    }
+
+    private String obtenerFuenteCheck(String cNombre) throws SQLException {
+        String sql =
+            "SELECT t.RDB$TRIGGER_SOURCE " +
+            "FROM RDB$CHECK_CONSTRAINTS cc " +
+            "JOIN RDB$TRIGGERS t ON cc.RDB$TRIGGER_NAME = t.RDB$TRIGGER_NAME " +
+            "WHERE cc.RDB$CONSTRAINT_NAME = ? AND t.RDB$TRIGGER_TYPE = 1";
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setString(1, cNombre);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
-                    String mod = rs.getString(1) != null ? rs.getString(1).trim() : "";
-                    String entry = rs.getString(2) != null ? rs.getString(2).trim() : "";
-                    return "DECLARE EXTERNAL FUNCTION " + func + "\nENTRY_POINT '" + entry + "'\nMODULE_NAME '" + mod + "';";
+                    return limpiar(rs.getString("RDB$TRIGGER_SOURCE"));
                 }
             }
         }
         return "";
     }
 
-    private String traducirTipo(int tipo, int subtipo, int largo, int escala, int prec) {
-        int escPos = Math.abs(escala);
+    private String mapearTipo(int tipo, int subTipo, int longitud, int charLen, int precision, int escala) {
+        int escAbs = Math.abs(escala);
+        int largoTexto = charLen > 0 ? charLen : longitud;
+
         switch (tipo) {
             case 7:
-                if (subtipo == 1) return "NUMERIC(" + prec + "," + escPos + ")";
-                if (subtipo == 2) return "DECIMAL(" + prec + "," + escPos + ")";
-                return "SMALLINT";
+                return escala < 0
+                    ? (subTipo == 2 ? "DECIMAL" : "NUMERIC") + "(" + (precision > 0 ? precision : 4) + "," + escAbs + ")"
+                    : "SMALLINT";
             case 8:
-                if (subtipo == 1) return "NUMERIC(" + prec + "," + escPos + ")";
-                if (subtipo == 2) return "DECIMAL(" + prec + "," + escPos + ")";
-                return "INTEGER";
+                return escala < 0
+                    ? (subTipo == 2 ? "DECIMAL" : "NUMERIC") + "(" + (precision > 0 ? precision : 9) + "," + escAbs + ")"
+                    : "INTEGER";
             case 10:
                 return "FLOAT";
             case 12:
@@ -284,26 +471,29 @@ public class GeneradorDDL {
             case 13:
                 return "TIME";
             case 14:
-                return "CHAR(" + largo + ")";
+                return "CHAR(" + largoTexto + ")";
             case 16:
-                if (subtipo == 1) return "NUMERIC(" + prec + "," + escPos + ")";
-                if (subtipo == 2) return "DECIMAL(" + prec + "," + escPos + ")";
-                return "BIGINT";
+                if (escala < 0 || subTipo == 1 || subTipo == 2) {
+                    return (subTipo == 2 ? "DECIMAL" : "NUMERIC") + "(" + (precision > 0 ? precision : 18) + "," + escAbs + ")";
+                }
+                return "NUMERIC(18,0)";
+            case 17:
+                return "BOOLEAN";
             case 27:
                 return "DOUBLE PRECISION";
             case 35:
                 return "TIMESTAMP";
             case 37:
-                return "VARCHAR(" + largo + ")";
+                return "VARCHAR(" + largoTexto + ")";
             case 261:
-                return "BLOB SUB_TYPE " + subtipo;
+                return "BLOB SUB_TYPE " + subTipo;
             default:
-                return "VARCHAR(" + largo + ")";
+                return "VARCHAR(" + Math.max(largoTexto, 50) + ")";
         }
     }
 
-    private String traducirEventoTrigger(int t) {
-        switch (t) {
+    private String mapearTipoTrigger(int tipo) {
+        switch (tipo) {
             case 1: return "BEFORE INSERT";
             case 2: return "AFTER INSERT";
             case 3: return "BEFORE UPDATE";
@@ -312,5 +502,14 @@ public class GeneradorDDL {
             case 6: return "AFTER DELETE";
             default: return "BEFORE INSERT";
         }
+    }
+
+    private int obtenerInt(ResultSet rs, String columna) throws SQLException {
+        Object val = rs.getObject(columna);
+        return (val instanceof Number) ? ((Number) val).intValue() : 0;
+    }
+
+    private String limpiar(String texto) {
+        return texto == null ? "" : texto.trim();
     }
 }

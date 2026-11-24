@@ -3,34 +3,112 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DBara - Administrador InterBase</title>
+    <title>DBara — Cliente InterBase</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <header class="barra">
-        <span class="marca">DBara</span>
-        <button id="btnConectar">Conexiones</button>
-        <button id="btnRefrescar">Refrescar Árbol</button>
-        <button id="btnEjecutar" class="primario">Ejecutar SQL</button>
-        <button id="btnScript">Ejecutar Script</button>
-        <button id="btnNuevaTabla">+ Tabla</button>
-        <button id="btnNuevaVista">+ Vista</button>
+        <div class="marca">
+            <svg class="logo-capy" viewBox="0 0 64 44" aria-hidden="true">
+                <circle cx="44" cy="13.5" r="3.4" fill="#D9822B"/>
+                <path d="M44 10.1 Q46.2 7.8 48 9.4" fill="none" stroke="#5B8C5A" stroke-width="1.8" stroke-linecap="round"/>
+                <ellipse cx="36.5" cy="16.5" rx="3.2" ry="4.1" transform="rotate(-18 36.5 16.5)" fill="#8C5A38"/>
+                <path d="M11 36 C9.5 24.5 16 17 28 17 L40 17 C48.5 17 55.5 20 56.5 26 C57.3 30.2 54.2 33.5 48 33.5 L44 33.5 L44 38.5 C44 40.5 40 40.5 40 38.5 L40 35.5 L22 35.5 L22 38.5 C22 40.5 18 40.5 18 38.5 L18 35.5 C13.5 35.5 11.5 36.2 11 36 Z" fill="#B57B50"/>
+                <path d="M43.5 23 Q46 21.5 48.5 23" fill="none" stroke="#231E1A" stroke-width="1.9" stroke-linecap="round"/>
+                <circle cx="53.5" cy="25.2" r="1.15" fill="#231E1A"/>
+                <path d="M50.5 29.8 Q52.8 31 55 29.5" fill="none" stroke="#231E1A" stroke-width="1.4" stroke-linecap="round"/>
+            </svg>
+            <span class="marca-nombre">DBara</span>
+        </div>
+
+        <nav class="acciones">
+            <button type="button" id="btnConectar">Conexiones</button>
+            <button type="button" id="btnDesconectar" class="oculto">Desconectar</button>
+            <button type="button" id="btnRefrescar">Refrescar</button>
+            <span class="separador"></span>
+            <button type="button" id="btnEjecutar" class="primario">Ejecutar SQL</button>
+            <button type="button" id="btnScript">Ejecutar Script</button>
+            <span class="separador"></span>
+            <button type="button" id="btnNuevaTabla">+ Tabla</button>
+            <button type="button" id="btnNuevaVista">+ Vista</button>
+        </nav>
+
+        <div class="indicador" id="indicadorConexion">
+            <span class="punto"></span>
+            <span id="textoIndicador">Desconectado</span>
+        </div>
     </header>
+
+    <div id="barraProgreso" class="barra-progreso" aria-hidden="true"></div>
 
     <main class="contenedor">
         <aside class="panel-arbol">
-            <div class="titulo-panel" id="tituloConexion">DBara (Desconectado)</div>
-            <div id="arbol" class="arbol"></div>
+            <div class="titulo-panel">
+                <span id="tituloConexion">Explorador</span>
+            </div>
+            <div class="buscador-arbol">
+                <input type="search" id="filtroArbol" placeholder="Filtrar objetos..." disabled>
+            </div>
+            <div id="arbol" class="arbol">
+                <div class="arbol-vacio">Conéctate a un servidor InterBase para explorar el catálogo.</div>
+            </div>
         </aside>
 
         <section class="panel-trabajo">
-            <div class="zona-editor">
-                <div class="titulo-panel">Editor SQL / DDL</div>
+            <div id="zonaEditor" class="zona-editor">
+                <div class="titulo-panel">
+                    <span>Editor SQL / DDL</span>
+                    <div class="titulo-acciones">
+                        <span class="atajo">Ctrl + Enter</span>
+                        <button type="button" id="btnLimpiarSql" class="btn-mini">Limpiar</button>
+                    </div>
+                </div>
                 <textarea id="editorSql" spellcheck="false" placeholder="Escribe una consulta SELECT o script DDL..."></textarea>
             </div>
-            <div class="zona-resultados">
-                <div class="titulo-panel">Resultados</div>
+
+            <div id="divisorHorizontal" class="divisor-horizontal" title="Arrastra para ajustar altura"></div>
+
+            <div id="zonaResultados" class="zona-resultados">
+                <div class="titulo-panel">
+                    <span>Resultados</span>
+                    <div class="titulo-acciones">
+                        <span class="badge oculto" id="tiempoEjecucion">0 ms</span>
+                        <span class="badge" id="contadorResultados">0 filas</span>
+                        <button type="button" id="btnExportarCsv" class="btn-mini oculto">Exportar CSV</button>
+                    </div>
+                </div>
                 <div class="tabla-wrap">
+                    <div id="cargandoResultados" class="cargando-resultados oculto">
+                        <svg class="capy-cargando" viewBox="0 0 64 50" aria-hidden="true">
+                            <g class="capy-cuerpo">
+                                <circle cx="44" cy="13.5" r="3.4" fill="#D9822B"/>
+                                <path d="M44 10.1 Q46.2 7.8 48 9.4" fill="none" stroke="#5B8C5A" stroke-width="1.8" stroke-linecap="round"/>
+                                <ellipse cx="36.5" cy="16.5" rx="3.2" ry="4.1" transform="rotate(-18 36.5 16.5)" fill="#8C5A38"/>
+                                <path d="M11 35 C9.5 24 16 17 28 17 L40 17 C48.5 17 55.5 20 56.5 26 C57.3 30.2 54.2 33.5 48 33.5 L15 33.5 C12.5 33.5 11.4 34.5 11 35 Z" fill="#B57B50"/>
+                                <path d="M43.5 23 Q46 21.5 48.5 23" fill="none" stroke="#231E1A" stroke-width="1.9" stroke-linecap="round"/>
+                                <circle cx="53.5" cy="25.2" r="1.15" fill="#231E1A"/>
+                                <path d="M50.5 29.8 Q52.8 31 55 29.5" fill="none" stroke="#231E1A" stroke-width="1.4" stroke-linecap="round"/>
+                            </g>
+                            <path class="onda onda-1" d="M8 38 Q20 35 32 38 T56 38" fill="none" stroke="#B36734" stroke-width="1.6" stroke-linecap="round"/>
+                            <path class="onda onda-2" d="M14 43 Q24 41 34 43 T52 43" fill="none" stroke="#C6BFB2" stroke-width="1.4" stroke-linecap="round"/>
+                        </svg>
+                        <p id="textoCargandoResultados">Consultando InterBase...</p>
+                    </div>
+
+                    <div id="estadoVacioResultados" class="vacio-resultados">
+                        <svg class="capy-vacio" viewBox="0 0 64 46" aria-hidden="true">
+                            <circle cx="44" cy="13.5" r="3.4" fill="#D9822B"/>
+                            <path d="M44 10.1 Q46.2 7.8 48 9.4" fill="none" stroke="#5B8C5A" stroke-width="1.8" stroke-linecap="round"/>
+                            <ellipse cx="36.5" cy="16.5" rx="3.2" ry="4.1" transform="rotate(-18 36.5 16.5)" fill="#8C5A38"/>
+                            <path d="M11 36 C9.5 24.5 16 17 28 17 L40 17 C48.5 17 55.5 20 56.5 26 C57.3 30.2 54.2 33.5 48 33.5 L44 33.5 L44 38.5 C44 40.5 40 40.5 40 38.5 L40 35.5 L22 35.5 L22 38.5 C22 40.5 18 40.5 18 38.5 L18 35.5 C13.5 35.5 11.5 36.2 11 36 Z" fill="#A6744F"/>
+                            <path d="M43.5 23 Q46 21.5 48.5 23" fill="none" stroke="#2B2622" stroke-width="1.8" stroke-linecap="round"/>
+                            <circle cx="53.5" cy="25.2" r="1.1" fill="#2B2622"/>
+                            <path d="M50.5 29.8 Q52.8 31 55 29.5" fill="none" stroke="#2B2622" stroke-width="1.4" stroke-linecap="round"/>
+                            <line x1="8" y1="41.5" x2="56" y2="41.5" stroke="#D5CFC5" stroke-width="1.5" stroke-linecap="round"/>
+                        </svg>
+                        <p>Todo tranquilo por aquí. Ejecuta una consulta o haz doble clic en un objeto del árbol.</p>
+                    </div>
+
                     <table id="tablaResultados">
                         <thead></thead>
                         <tbody></tbody>
@@ -40,30 +118,46 @@
         </section>
     </main>
 
-    <footer id="barraEstado" class="estado">Listo. Conéctate a una base de datos para empezar.</footer>
+    <footer id="barraEstado" class="estado">Listo. Abre Conexiones para iniciar sesión en InterBase.</footer>
+
+    <div id="toastContenedor" class="toast-contenedor" aria-live="polite"></div>
 
     <div id="modalConexion" class="modal oculto">
         <div class="modal-caja">
             <h3>Conexión a InterBase</h3>
+            <div class="fila-perfil">
+                <select id="selectPerfil">
+                    <option value="">-- Nuevo perfil --</option>
+                </select>
+                <button type="button" id="btnEliminarPerfil" class="peligro">Eliminar</button>
+            </div>
             <form id="formConexion">
-                <label>Host / IP VPS
-                    <input type="text" id="conHost" value="20.102.213.164" required>
+                <label>Nombre del perfil
+                    <input type="text" id="conNombre" placeholder="Ej: Servidor InterBase" required>
                 </label>
-                <label>Puerto
-                    <input type="text" id="conPuerto" value="3050" required>
+                <div class="dos-columnas">
+                    <label>Host / IP del servidor
+                        <input type="text" id="conHost" placeholder="Ej: 192.168.1.10" required>
+                    </label>
+                    <label>Puerto
+                        <input type="text" id="conPuerto" placeholder="3050" value="3050" required>
+                    </label>
+                </div>
+                <label>Ruta del archivo (.ib / .gdb)
+                    <input type="text" id="conRuta" placeholder="Ej: /ruta/a/base_datos.ib" required>
                 </label>
-                <label>Ruta archivo (.ib)
-                    <input type="text" id="conRuta" value="/opt/interbase/proyecto.ib" required>
-                </label>
-                <label>Usuario
-                    <input type="text" id="conUsuario" value="SYSDBA" required>
-                </label>
-                <label>Contraseña
-                    <input type="password" id="conClave" required>
-                </label>
+                <div class="dos-columnas">
+                    <label>Usuario
+                        <input type="text" id="conUsuario" placeholder="Ej: SYSDBA" required>
+                    </label>
+                    <label>Contraseña
+                        <input type="password" id="conClave" placeholder="••••••••" required>
+                    </label>
+                </div>
                 <div class="acciones-modal">
+                    <button type="button" id="btnGuardarPerfil">Guardar</button>
                     <button type="button" class="cerrar-modal">Cancelar</button>
-                    <button type="submit" class="primario">Conectar</button>
+                    <button type="submit" id="btnSubmitConexion" class="primario">Conectar</button>
                 </div>
             </form>
         </div>
@@ -74,10 +168,36 @@
             <h3>Nueva Tabla</h3>
             <form id="formTabla">
                 <label>Nombre de la tabla
-                    <input type="text" id="tablaNombre" required>
+                    <input type="text" id="tablaNombre" placeholder="Ej: CLIENTES" required>
                 </label>
                 <div id="listaColumnas" class="lista-columnas"></div>
                 <button type="button" id="btnAgregarColumna">+ Agregar columna</button>
                 <div class="acciones-modal">
                     <button type="button" class="cerrar-modal">Cancelar</button>
-                    <button type="submit
+                    <button type="submit" class="primario">Crear Tabla</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="modalVista" class="modal oculto">
+        <div class="modal-caja">
+            <h3>Nueva Vista</h3>
+            <form id="formVista">
+                <label>Nombre de la vista
+                    <input type="text" id="vistaNombre" placeholder="Ej: V_RESUMEN" required>
+                </label>
+                <label>Consulta SELECT
+                    <textarea id="vistaSelect" rows="5" required placeholder="SELECT * FROM ..."></textarea>
+                </label>
+                <div class="acciones-modal">
+                    <button type="button" class="cerrar-modal">Cancelar</button>
+                    <button type="submit" class="primario">Crear Vista</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
