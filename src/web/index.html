@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DBara - Administrador InterBase</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header class="barra">
+        <span class="marca">DBara</span>
+        <button id="btnConectar">Conexiones</button>
+        <button id="btnRefrescar">Refrescar Árbol</button>
+        <button id="btnEjecutar" class="primario">Ejecutar SQL</button>
+        <button id="btnScript">Ejecutar Script</button>
+        <button id="btnNuevaTabla">+ Tabla</button>
+        <button id="btnNuevaVista">+ Vista</button>
+    </header>
+
+    <main class="contenedor">
+        <aside class="panel-arbol">
+            <div class="titulo-panel" id="tituloConexion">DBara (Desconectado)</div>
+            <div id="arbol" class="arbol"></div>
+        </aside>
+
+        <section class="panel-trabajo">
+            <div class="zona-editor">
+                <div class="titulo-panel">Editor SQL / DDL</div>
+                <textarea id="editorSql" spellcheck="false" placeholder="Escribe una consulta SELECT o script DDL..."></textarea>
+            </div>
+            <div class="zona-resultados">
+                <div class="titulo-panel">Resultados</div>
+                <div class="tabla-wrap">
+                    <table id="tablaResultados">
+                        <thead></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer id="barraEstado" class="estado">Listo. Conéctate a una base de datos para empezar.</footer>
+
+    <div id="modalConexion" class="modal oculto">
+        <div class="modal-caja">
+            <h3>Conexión a InterBase</h3>
+            <form id="formConexion">
+                <label>Host / IP VPS
+                    <input type="text" id="conHost" value="20.102.213.164" required>
+                </label>
+                <label>Puerto
+                    <input type="text" id="conPuerto" value="3050" required>
+                </label>
+                <label>Ruta archivo (.ib)
+                    <input type="text" id="conRuta" value="/opt/interbase/proyecto.ib" required>
+                </label>
+                <label>Usuario
+                    <input type="text" id="conUsuario" value="SYSDBA" required>
+                </label>
+                <label>Contraseña
+                    <input type="password" id="conClave" required>
+                </label>
+                <div class="acciones-modal">
+                    <button type="button" class="cerrar-modal">Cancelar</button>
+                    <button type="submit" class="primario">Conectar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="modalTabla" class="modal oculto">
+        <div class="modal-caja modal-grande">
+            <h3>Nueva Tabla</h3>
+            <form id="formTabla">
+                <label>Nombre de la tabla
+                    <input type="text" id="tablaNombre" required>
+                </label>
+                <div id="listaColumnas" class="lista-columnas"></div>
+                <button type="button" id="btnAgregarColumna">+ Agregar columna</button>
+                <div class="acciones-modal">
+                    <button type="button" class="cerrar-modal">Cancelar</button>
+                    <button type="submit

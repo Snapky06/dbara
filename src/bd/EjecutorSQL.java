@@ -1,107 +1,275 @@
 package bd;
 
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.Vector;
-import javax.swing.table.DefaultTableModel;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
 public class EjecutorSQL {
 
-    private final Connection con;
+    private final Connection connection;
 
-    public static class Resultado {
-        public boolean esConsulta;
-        public DefaultTableModel modelo;
-        public String mensaje;
+    public static class ResultadoConsulta {
+        public final boolean esConsulta;
+        public final String mensaje;
+        public final List<String> columnas;
+        public final List<Object[]> filas;
+
+        public ResultadoConsulta(
+            boolean esConsulta,
+            String mensaje,
+            List<String> columnas,
+            List<Object[]> filas
+        ) {
+            this.esConsulta = esConsulta;
+            this.mensaje = mensaje;
+            this.columnas = columnas;
+            this.filas = filas;
+        }
     }
 
-    public EjecutorSQL(Connection con) {
-        this.con = con;
+    public EjecutorSQL(Connection connection) {
+        if (connection == null) {
+            throw new IllegalArgumentException("La conexion no puede ser nula.");
+        }
+        this.connection = connection;
     }
 
-    public Resultado ejecutar(String sql) throws SQLException {
-        Resultado res = new Resultado();
-        String limpio = sql.trim();
-
-        if (limpio.endsWith(";")) {
-            limpio = limpio.substring(0, limpio.length() - 1).trim();
+    public ResultadoConsulta ejecutar(String sql) throws SQLException {
+        List<String> sentencias = dividirSentencias(sql);
+        if (sentencias.isEmpty()) {
+            throw new SQLException("La consulta SQL esta vacia.");
         }
 
-        String inicio = limpio.toUpperCase();
-        if (inicio.startsWith("SELECT") || inicio.startsWith("WITH")) {
-            res.esConsulta = true;
-            try (Statement st = con.createStatement();
-                 ResultSet rs = st.executeQuery(limpio)) {
-                res.modelo = armarTabla(rs);
-                res.mensaje = "Filas devueltas: " + res.modelo.getRowCount();
-            }
-        } else {
-            res.esConsulta = false;
-            try (Statement st = con.createStatement()) {
-                int filas = st.executeUpdate(limpio);
-                res.mensaje = "Sentencia ejecutada. Filas afectadas: " + filas;
+        ResultadoConsulta ultimoResultado = null;
+        int ejecutadas = 0;
+
+        try (Statement statement = connection.createStatement()) {
+            for (String sentencia : sentencias) {
+                boolean tieneResultSet = statement.execute(sentencia);
+                ejecutadas++;
+                if (tieneResultSet) {
+                    try (ResultSet rs = statement.getResultSet()) {
+                        ultimoResultado = extraerResultSet(rs);
+                    }
+                } else {
+                    int afectadas = statement.getUpdateCount();
+                    String msg = afectadas >= 0
+                        ? "Sentencia ejecutada. Filas afectadas: " + afectadas
+                        : "Sentencia ejecutada correctamente.";
+                    ultimoResultado = new ResultadoConsulta(false, msg, List.of(), List.of());
+                }
             }
         }
-        return res;
+
+        if (sentencias.size() > 1 && !ultimoResultado.esConsulta) {
+            return new ResultadoConsulta(false, "Sentencias ejecutadas: " + ejecutadas, List.of(), List.of());
+        }
+        return ultimoResultado;
     }
 
     public String ejecutarScript(String script) throws SQLException {
-        String limpio = script.trim();
-        String upper = limpio.toUpperCase();
-
-        if (upper.startsWith("CREATE TRIGGER") || upper.startsWith("ALTER TRIGGER") ||
-            upper.startsWith("CREATE PROCEDURE") || upper.startsWith("ALTER PROCEDURE") ||
-            upper.startsWith("CREATE OR ALTER")) {
-            try (Statement st = con.createStatement()) {
-                st.execute(limpio);
-            }
-            return "Objeto compilado correctamente.";
+        List<String> sentencias = dividirSentencias(script);
+        if (sentencias.isEmpty()) {
+            throw new SQLException("El script SQL esta vacio.");
         }
 
-        String[] sentencias = limpio.split(";");
         int ejecutadas = 0;
-        try (Statement st = con.createStatement()) {
-            for (String s : sentencias) {
-                String sLimpia = s.trim();
-                if (!sLimpia.isEmpty()) {
-                    st.execute(sLimpia);
-                    ejecutadas++;
-                }
+        try (Statement statement = connection.createStatement()) {
+            for (String sentencia : sentencias) {
+                statement.execute(sentencia);
+                ejecutadas++;
             }
         }
         return "Script completado. Sentencias ejecutadas: " + ejecutadas;
     }
 
-    private DefaultTableModel armarTabla(ResultSet rs) throws SQLException {
+    private ResultadoConsulta extraerResultSet(ResultSet rs) throws SQLException {
         ResultSetMetaData meta = rs.getMetaData();
-        int totalCols = meta.getColumnCount();
+        int totalColumnas = meta.getColumnCount();
+        List<String> columnas = new ArrayList<>(totalColumnas);
+        Set<String> usadas = new HashSet<>();
 
-        Vector<String> columnas = new Vector<>();
-        for (int i = 1; i <= totalCols; i++) {
-            columnas.add(meta.getColumnLabel(i).trim());
+        for (int i = 1; i <= totalColumnas; i++) {
+            String base = meta.getColumnLabel(i);
+            if (base == null || base.isBlank()) {
+                base = meta.getColumnName(i);
+            }
+            base = (base == null || base.isBlank()) ? "COL_" + i : base.trim();
+
+            String nombre = base;
+            int sufijo = 2;
+            while (!usadas.add(nombre)) {
+                nombre = base + "_" + sufijo++;
+            }
+            columnas.add(nombre);
         }
 
-        Vector<Vector<Object>> datos = new Vector<>();
+        List<Object[]> filas = new ArrayList<>();
         while (rs.next()) {
-            Vector<Object> fila = new Vector<>();
-            for (int i = 1; i <= totalCols; i++) {
-                Object val = rs.getObject(i);
-                if (val instanceof String) {
-                    val = ((String) val).trim();
+            Object[] fila = new Object[totalColumnas];
+            for (int i = 1; i <= totalColumnas; i++) {
+                Object valor = rs.getObject(i);
+                if (valor instanceof String) {
+                    valor = ((String) valor).trim();
+                } else if (valor instanceof byte[]) {
+                    valor = new String((byte[]) valor, StandardCharsets.UTF_8).trim();
                 }
-                fila.add(val);
+                fila[i - 1] = valor;
             }
-            datos.add(fila);
+            filas.add(fila);
         }
 
-        return new DefaultTableModel(datos, columnas) {
-            @Override
-            public boolean isCellEditable(int row, int column) {
-                return false;
+        return new ResultadoConsulta(true, "Filas devueltas: " + filas.size(), columnas, filas);
+    }
+
+    private List<String> dividirSentencias(String script) {
+        List<String> sentencias = new ArrayList<>();
+        if (script == null || script.isBlank()) {
+            return sentencias;
+        }
+
+        StringBuilder actual = new StringBuilder();
+        String delimitador = ";";
+        int profundidad = 0;
+        boolean enSimple = false;
+        boolean enDoble = false;
+        boolean enLinea = false;
+        boolean enBloque = false;
+        int n = script.length();
+
+        for (int i = 0; i < n; i++) {
+            char c = script.charAt(i);
+            char sig = (i + 1 < n) ? script.charAt(i + 1) : '\0';
+
+            if (enLinea) {
+                actual.append(c);
+                if (c == '\n') {
+                    enLinea = false;
+                }
+                continue;
             }
-        };
+
+            if (enBloque) {
+                actual.append(c);
+                if (c == '*' && sig == '/') {
+                    actual.append(sig);
+                    i++;
+                    enBloque = false;
+                }
+                continue;
+            }
+
+            if (enSimple) {
+                actual.append(c);
+                if (c == '\'') {
+                    if (sig == '\'') {
+                        actual.append(sig);
+                        i++;
+                    } else {
+                        enSimple = false;
+                    }
+                }
+                continue;
+            }
+
+            if (enDoble) {
+                actual.append(c);
+                if (c == '"') {
+                    if (sig == '"') {
+                        actual.append(sig);
+                        i++;
+                    } else {
+                        enDoble = false;
+                    }
+                }
+                continue;
+            }
+
+            if (c == '-' && sig == '-') {
+                actual.append(c).append(sig);
+                i++;
+                enLinea = true;
+                continue;
+            }
+
+            if (c == '/' && sig == '*') {
+                actual.append(c).append(sig);
+                i++;
+                enBloque = true;
+                continue;
+            }
+
+            if (c == '\'') {
+                enSimple = true;
+                actual.append(c);
+                continue;
+            }
+
+            if (c == '"') {
+                enDoble = true;
+                actual.append(c);
+                continue;
+            }
+
+            if (delimitador.equals(";") && esCaracterPalabra(c)) {
+                int inicio = i;
+                while (i + 1 < n && esCaracterPalabra(script.charAt(i + 1))) {
+                    i++;
+                }
+                String palabra = script.substring(inicio, i + 1);
+                actual.append(palabra);
+                String upper = palabra.toUpperCase();
+                if (upper.equals("BEGIN") || upper.equals("CASE")) {
+                    profundidad++;
+                } else if (upper.equals("END") && profundidad > 0) {
+                    profundidad--;
+                }
+                continue;
+            }
+
+            if ((profundidad == 0 || !delimitador.equals(";")) && script.startsWith(delimitador, i)) {
+                int len = delimitador.length();
+                delimitador = procesarBloque(actual.toString(), delimitador, sentencias);
+                actual.setLength(0);
+                profundidad = 0;
+                i += len - 1;
+                continue;
+            }
+
+            actual.append(c);
+        }
+
+        procesarBloque(actual.toString(), delimitador, sentencias);
+        return sentencias;
+    }
+
+    private String procesarBloque(String texto, String delimitadorActual, List<String> destino) {
+        String sinCom = quitarComentarios(texto).trim();
+        if (sinCom.isEmpty()) {
+            return delimitadorActual;
+        }
+        String normalizada = sinCom.replaceAll("\\s+", " ");
+        if (normalizada.toUpperCase().startsWith("SET TERM ")) {
+            String nuevo = normalizada.substring(9).trim();
+            return nuevo.isEmpty() ? delimitadorActual : nuevo;
+        }
+        destino.add(texto.trim());
+        return delimitadorActual;
+    }
+
+    private String quitarComentarios(String sql) {
+        return sql.replaceAll("(?s)/\\*.*?\\*/", " ")
+                  .replaceAll("(?m)--[^\\n]*", " ");
+    }
+
+    private boolean esCaracterPalabra(char c) {
+        return Character.isLetterOrDigit(c) || c == '_' || c == '$';
     }
 }

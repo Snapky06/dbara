@@ -1,0 +1,278 @@
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+    background: #1e1e1e;
+    color: #e5e5e5;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.barra {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: #252526;
+    border-bottom: 1px solid #3c3c3c;
+}
+
+.marca {
+    font-weight: 700;
+    font-size: 15px;
+    margin-right: 12px;
+    color: #4ec9b0;
+}
+
+button {
+    background: #333333;
+    color: #e5e5e5;
+    border: 1px solid #4a4a4a;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+button:hover {
+    background: #404040;
+}
+
+button.primario {
+    background: #0e639c;
+    border-color: #1177bb;
+}
+
+button.primario:hover {
+    background: #1177bb;
+}
+
+.contenedor {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+}
+
+.panel-arbol {
+    width: 280px;
+    background: #252526;
+    border-right: 1px solid #3c3c3c;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.titulo-panel {
+    padding: 8px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    background: #2d2d2d;
+    border-bottom: 1px solid #3c3c3c;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.arbol {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+    font-size: 13px;
+}
+
+.categoria {
+    margin-bottom: 6px;
+}
+
+.categoria-titulo {
+    font-weight: 600;
+    padding: 4px 6px;
+    cursor: pointer;
+    border-radius: 3px;
+    user-select: none;
+}
+
+.categoria-titulo:hover {
+    background: #37373d;
+}
+
+.categoria-lista {
+    list-style: none;
+    padding-left: 16px;
+    margin-top: 2px;
+}
+
+.categoria-lista.oculto {
+    display: none;
+}
+
+.categoria-lista li {
+    padding: 3px 6px;
+    cursor: pointer;
+    border-radius: 3px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.categoria-lista li:hover {
+    background: #094771;
+}
+
+.panel-trabajo {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+}
+
+.zona-editor {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    border-bottom: 1px solid #3c3c3c;
+    min-height: 0;
+}
+
+#editorSql {
+    flex: 1;
+    width: 100%;
+    background: #1e1e1e;
+    color: #d4d4d4;
+    border: none;
+    padding: 12px;
+    font-family: Consolas, Monaco, monospace;
+    font-size: 14px;
+    resize: none;
+    outline: none;
+}
+
+.zona-resultados {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.tabla-wrap {
+    flex: 1;
+    overflow: auto;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+th, td {
+    border: 1px solid #3c3c3c;
+    padding: 6px 10px;
+    text-align: left;
+    white-space: nowrap;
+}
+
+th {
+    background: #2d2d2d;
+    position: sticky;
+    top: 0;
+}
+
+tr:nth-child(even) td {
+    background: #252526;
+}
+
+.estado {
+    padding: 6px 12px;
+    font-size: 12px;
+    background: #007acc;
+    color: #ffffff;
+}
+
+.modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.65);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+}
+
+.modal.oculto {
+    display: none;
+}
+
+.modal-caja {
+    background: #252526;
+    border: 1px solid #454545;
+    border-radius: 6px;
+    padding: 18px;
+    width: 400px;
+    max-width: 92vw;
+}
+
+.modal-grande {
+    width: 580px;
+}
+
+.modal-caja h3 {
+    margin-bottom: 14px;
+    font-size: 16px;
+}
+
+.modal-caja label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 13px;
+    margin-bottom: 10px;
+}
+
+.modal-caja input,
+.modal-caja select,
+.modal-caja textarea {
+    background: #1e1e1e;
+    color: #e5e5e5;
+    border: 1px solid #4a4a4a;
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-family: inherit;
+    font-size: 13px;
+}
+
+.lista-columnas {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 10px;
+    max-height: 240px;
+    overflow-y: auto;
+}
+
+.fila-columna {
+    display: grid;
+    grid-template-columns: 1.4fr 1.2fr auto auto auto;
+    gap: 6px;
+    align-items: center;
+}
+
+.fila-columna label {
+    flex-direction: row;
+    align-items: center;
+    margin: 0;
+    font-size: 12px;
+}
+
+.acciones-modal {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 14px;
+}
